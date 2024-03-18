@@ -113,6 +113,22 @@ class Ball extends Point {
 
     canvas.addEventListener("touchend", endListener);
     canvas.addEventListener("touchcancel", endListener);
+
+    // mouse listeners
+    document.addEventListener('mousedown', (e) => {
+      if (this.touch) return;
+      if (turn !== this.id) return;
+
+      const touch = e;
+
+      this.touch = {
+        id: -1,
+        start: new Point(touch.clientX, Ball.transformPoint(touch.clientY)),
+        current: new Point(touch.clientX, Ball.transformPoint(touch.clientY)),
+      };
+    });
+
+    
   }
 
   get pullAngle() {
