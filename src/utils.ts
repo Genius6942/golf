@@ -13,6 +13,14 @@ export class Point {
     }
   }
 
+  add(p: Point) {
+    return new Point(this.x + p.x, this.y + p.y);
+  }
+
+  subtract(p: Point) {
+    return new Point(this.x - p.x, this.y - p.y);
+  }
+
   set(point: { x: number; y: number }): void;
   set(x: number, y: number): void;
   set(p1: { x: number; y: number } | number, p2?: number): void {
@@ -31,5 +39,13 @@ export class Point {
 
   equals(point: Point) {
     return point.x === this.x && point.y === this.y;
+  }
+
+  distance(point: Point) {
+    return Math.sqrt((point.x - this.x) ** 2 + (point.y - this.y) ** 2);
+  }
+
+  clone() {
+    return new Point(this.x, this.y);
   }
 }

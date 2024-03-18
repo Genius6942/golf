@@ -40,7 +40,11 @@ class Ball extends Point {
   v: Point = new Point(0, 0);
 
   touch: Touch | null = null;
-  constructor(id: number, { x, y }: { x: number; y: number }, options: BallOptions = {}) {
+  constructor(
+    id: number,
+    { x, y }: { x: number; y: number },
+    options: BallOptions = {}
+  ) {
     super(x, y);
 
     this.id = id;
@@ -115,7 +119,7 @@ class Ball extends Point {
     canvas.addEventListener("touchcancel", endListener);
 
     // mouse listeners
-    document.addEventListener('mousedown', (e) => {
+    document.addEventListener("mousedown", (e) => {
       if (this.touch) return;
       if (turn !== this.id) return;
 
@@ -128,7 +132,38 @@ class Ball extends Point {
       };
     });
 
-    
+    document.addEventListener("mousemove", (e) => {
+      if (!this.touch) return;
+      if (this.id !== turn) {
+        this.touch = null;
+        return;
+      }
+      if (this.touch && this.touch.id === -1) {
+        this.touch.current.set({
+          x: e.clientX,
+          y: Ball.transformPoint(e.clientY),
+        });
+      }
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!this.touch) return;
+
+      if (this.touch && this.touch.id === -1) {
+        const angle = this.pullAngle;
+        if (angle === undefined) return;
+        this.state = "fly";
+
+        this.v.set({
+          x: -Math.cos(angle) * this.pullback!,
+          y: -Math.sin(angle) * this.pullback!,
+        });
+        this.touch = null;
+        turn = (turn + 1) % players.length;
+
+        this.touch = null;
+      }
+    });
   }
 
   get pullAngle() {
@@ -145,7 +180,8 @@ class Ball extends Point {
   }
 
   get tension(): number {
-    if (!this.touch || this.touch.current.equals(this.touch.start)) return null as any;
+    if (!this.touch || this.touch.current.equals(this.touch.start))
+      return null as any;
     return Math.sqrt(
       (this.touch.current.x - this.touch.start.x) ** 2 +
         (this.touch.current.y - this.touch.start.y) ** 2
@@ -163,8 +199,28 @@ class Ball extends Point {
       this.v.set({ x: 0, y: 0 });
     }
 
-    this.x += this.v.x;
-    this.y += this.v.y;
+    // Calculate the magnitude of the velocity vector
+    const velocityMagnitude = Math.sqrt(this.v.x ** 2 + this.v.y ** 2);
+
+    // Define a constant for the desired step size
+    const desiredStepSize = 1; // Adjust this value as needed for desired granularity
+
+    // Calculate the number of steps dynamically based on velocity magnitude and desired step size
+    const numSteps = Math.ceil(velocityMagnitude / desiredStepSize);
+
+    for (let i = 0; i < numSteps; i++) {
+      this.x += this.v.x / numSteps;
+      this.y += this.v.y / numSteps;
+
+      // Check for collision with each line segment
+      borders.forEach((border) =>
+        border.forEach((segment) => {
+          if (this.intersectsLine(...segment)) {
+            this.bounceOffLine(...segment);
+          }
+        })
+      );
+    }
   }
 
   intersectsLine(p1: Point, p2: Point) {
@@ -183,7 +239,7 @@ class Ball extends Point {
     );
     if (isNaN(d)) {
       // no intercept
-      return [];
+      return false;
     }
     const u1 = (b - d) / c; // these represent the unit distance of point one and two on the line
     const u2 = (b + d) / c;
@@ -211,7 +267,9 @@ class Ball extends Point {
 
   render() {
     ctx.beginPath();
-    ctx.fillStyle = this.color;
+    ctx.fillStyle = this.intersects(map.hole, holeRadius)
+      ? "black"
+      : this.color;
 
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
 
@@ -223,22 +281,40 @@ class Ball extends Point {
 
       ctx.beginPath();
 
-      ctx.moveTo(...this.touch.start.array());
-      ctx.lineTo(...this.touch.current.array());
+      ctx.moveTo(...this.array());
+      ctx.lineTo(
+        ...this.touch.current.subtract(this.touch.start).add(this).array()
+      );
 
       ctx.stroke();
     }
   }
+
+  intersects(circle: Point, circleRadius: number) {
+    return this.distance(circle) <= this.radius + circleRadius;
+  }
 }
 
-const players = [new Ball(0, { x: 100, y: 100 }), new Ball(1, { x: 200, y: 100 })];
+const players = [
+  new Ball(0, { x: 100, y: 100 }),
+  new Ball(1, { x: 200, y: 100 }),
+];
 
 const camera = new Point(canvas.width / 2, canvas.height / 2);
 
 const map = maps[0];
 
+const holeRadius = 20;
+
 const borders = map.borders.map((border) => {
-	
+  const res: [Point, Point][] = [];
+
+  for (let i = 0; i < border.length; i++) {
+    res.push([border[i].clone(), border[(i + 1) % border.length].clone()]);
+  }
+
+  return res;
+});
 
 const render = () => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -247,10 +323,31 @@ const render = () => {
   ctx.save();
 
   ctx.scale(1, -1);
-  ctx.translate(camera.x - canvas.width / 2, camera.y - (canvas.height / 2) * 3);
+  ctx.translate(
+    camera.x - canvas.width / 2,
+    camera.y - (canvas.height / 2) * 3
+  );
+
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "black";
+  borders.forEach((border) => {
+    border.forEach((segment) => {
+      ctx.beginPath();
+      ctx.moveTo(...segment[0].array());
+      ctx.lineTo(...segment[1].array());
+      ctx.stroke();
+    });
+  });
+
+  ctx.beginPath();
+  ctx.fillStyle = "grey";
+  ctx.arc(...map.hole.array(), holeRadius, 0, Math.PI * 2);
+  ctx.fill();
 
   players.forEach((player) => player.update());
   players.forEach((player) => player.render());
+
+  // draw hole
 
   ctx.restore();
 
