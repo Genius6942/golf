@@ -1,4 +1,6 @@
+import { maps } from "./maps";
 import "./style.css";
+import { Point } from "./utils";
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d")!;
@@ -12,127 +14,38 @@ const resize = () => {
 resize();
 window.addEventListener("resize", resize);
 
-class Point {
-  y: number;
-  x: number;
-  constructor(point: { x: number; y: number });
-  constructor(x: number, y: number);
-  constructor(p1: { x: number; y: number } | number, p2?: number) {
-    if (typeof p1 === "object") {
-      this.x = p1.x;
-      this.y = p1.y;
-    } else {
-      this.x = p1;
-      this.y = p2!;
-    }
-  }
-
-  set(point: { x: number; y: number }): void;
-  set(x: number, y: number): void;
-  set(p1: { x: number; y: number } | number, p2?: number): void {
-    if (typeof p1 === "object") {
-      this.x = p1.x;
-      this.y = p1.y;
-    } else {
-      this.x = p1;
-      this.y = p2!;
-    }
-  }
-
-  array(): [number, number] {
-    return [this.x, this.y];
-  }
-
-  equals(point: Point) {
-    return point.x === this.x && point.y === this.y;
-  }
-}
-
 interface Touch {
   id: number;
   start: Point;
   current: Point;
 }
 
-const friction = .03;
-
-const ball = {
-  x: 0,
-  y: 0,
-  vx: 0,
-  vy: 0,
-  radius: 10,
-  speedResistance: 5,
-  state: "wait" as "wait" | "pull" | "fly",
-
-  get color() {
-    return "red";
-  },
-
-  update() {
-    if (this.state === "wait" || this.state === "pull") {
-      if (turn === "left") this.setToSling(left);
-      else this.setToSling(right);
-    } else if (this.state === "fly") {
-      this.vy += gravity;
-
-      this.x += this.vx;
-      this.y += this.vy;
-
-      if (this.y + this.radius < -200) {
-        this.state = "wait";
-        turn = turn === "right" ? "left" : "right";
-      }
-    }
-  },
-  setToSling(sling: Sling) {
-    const angle = sling.pullAngle;
-    if (!angle) {
-      if (this.state === "pull") {
-        this.state = "fly";
-        this.vx = (-1 * (this.x - sling.base.x)) / this.speedResistance;
-        this.vy = (-1 * (this.y - (sling.base.y + sling.height))) / this.speedResistance;
-      } else {
-        this.x = sling.base.x;
-        this.y = sling.base.y + sling.height;
-      }
-    } else {
-      this.x = sling.base.x + Math.cos(angle) * sling.pullback!;
-      this.y = sling.base.y + sling.height + Math.sin(angle) * sling.pullback!;
-      this.state = "pull";
-    }
-  },
-
-  render() {
-    ctx.beginPath();
-    ctx.fillStyle = this.color;
-
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-
-    ctx.fill();
-  },
-};
+const friction = 0.03;
 
 let turn: number = 0;
+
+interface BallOptions {
+  color?: string;
+}
 
 class Ball extends Point {
   id: number;
   width = 10;
   height = 100;
-  pullbackMultiplier = 0.5;
+  pullbackMultiplier = 0.08;
   thickness = 10;
-  color = Math.floor(Math.random() * 16777215).toString(16);
+  color = "#" + Math.floor(Math.random() * 16777215).toString(16);
   state: "pull" | "fly" = "pull";
-	radius = 10;
-	v: Point = new Point(0, 0);
+  radius = 10;
+  v: Point = new Point(0, 0);
 
   touch: Touch | null = null;
-  constructor(id: number, { x, y }: { x: number; y: number }) {
+  constructor(id: number, { x, y }: { x: number; y: number }, options: BallOptions = {}) {
     super(x, y);
 
-
-
     this.id = id;
+
+    if (options.color) this.color = options.color;
 
     this.bindTouchControls();
   }
@@ -177,11 +90,29 @@ class Ball extends Point {
       }
     });
 
-    document.addEventListener("touchend", (e) => {
+    const endListener = (e: TouchEvent) => {
       if (!this.touch) return;
-      if (![...e.touches].find((touch) => touch.identifier === this.touch?.id))
+      const touchFound = !![...e.touches].find(
+        (touch) => touch.identifier === this.touch?.id
+      );
+
+      if (this.touch && !touchFound) {
+        const angle = this.pullAngle;
+        if (angle === undefined) return;
+        this.state = "fly";
+
+        this.v.set({
+          x: -Math.cos(angle) * this.pullback!,
+          y: -Math.sin(angle) * this.pullback!,
+        });
         this.touch = null;
-    });
+        turn = (turn + 1) % players.length;
+      }
+      if (!touchFound) this.touch = null;
+    };
+
+    canvas.addEventListener("touchend", endListener);
+    canvas.addEventListener("touchcancel", endListener);
   }
 
   get pullAngle() {
@@ -205,18 +136,62 @@ class Ball extends Point {
     ) as any;
   }
 
-	update() {
-		if (this.state === "fly") {
-			this.v.x *= (1 - friction);
-			if (this.v.x < 0.01 && this.v.x > -0.01) this.v.x = 0;
-			this.v.y *= (1 - friction);
-			if (this.v.y < 0.01 && this.v.y > -0.01) this.v.y = 0;
-		} else {
-			this.state = "pull";
-		}
+  update() {
+    if (this.state === "fly") {
+      this.v.x *= 1 - friction;
+      if (this.v.x < 0.01 && this.v.x > -0.01) this.v.x = 0;
+      this.v.y *= 1 - friction;
+      if (this.v.y < 0.01 && this.v.y > -0.01) this.v.y = 0;
+    } else {
+      this.state = "pull";
+      this.v.set({ x: 0, y: 0 });
+    }
 
+    this.x += this.v.x;
+    this.y += this.v.y;
   }
 
+  intersectsLine(p1: Point, p2: Point) {
+    const v1 = {
+      x: p2.x - p1.x,
+      y: p2.y - p1.y,
+    };
+    const v2 = {
+      x: p1.x - this.x,
+      y: p1.y - this.y,
+    };
+    let b = -(v1.x * v2.x + v1.y * v2.y) * 2;
+    const c = 2 * (v1.x * v1.x + v1.y * v1.y);
+    const d = Math.sqrt(
+      b * b - 2 * c * (v2.x * v2.x + v2.y * v2.y - this.radius * this.radius)
+    );
+    if (isNaN(d)) {
+      // no intercept
+      return [];
+    }
+    const u1 = (b - d) / c; // these represent the unit distance of point one and two on the line
+    const u2 = (b + d) / c;
+    if (u1 <= 1 && u1 >= 0) {
+      return true;
+    }
+    if (u2 <= 1 && u2 >= 0) {
+      return true;
+    }
+    return false;
+  }
+
+  bounceOffLine(p1: Point, p2: Point) {
+    const n = {
+      x: p2.y - p1.y,
+      y: p1.x - p2.x,
+    };
+    const len = Math.sqrt(n.x * n.x + n.y * n.y);
+    n.x /= len;
+    n.y /= len;
+    const dot = this.v.x * n.x + this.v.y * n.y;
+    this.v.x -= 2 * dot * n.x;
+    this.v.y -= 2 * dot * n.y;
+  }
 
   render() {
     ctx.beginPath();
@@ -244,8 +219,10 @@ const players = [new Ball(0, { x: 100, y: 100 }), new Ball(1, { x: 200, y: 100 }
 
 const camera = new Point(canvas.width / 2, canvas.height / 2);
 
-const boundaryGap = 30;
-const boundaryWidth = 10;
+const map = maps[0];
+
+const borders = map.borders.map((border) => {
+	
 
 const render = () => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -256,23 +233,8 @@ const render = () => {
   ctx.scale(1, -1);
   ctx.translate(camera.x - canvas.width / 2, camera.y - (canvas.height / 2) * 3);
 
-  // draw middle line
-
-  for (let i = 0; i < Math.ceil(window.innerHeight / boundaryGap); i += 2) {
-    ctx.fillStyle = "#aaaaaa";
-    ctx.fillRect(
-      canvas.width / 2 - boundaryWidth / 2,
-      i * boundaryGap,
-      boundaryWidth,
-      boundaryGap
-    );
-  }
-
-  left.render();
-  right.render();
-
-  ball.update();
-  ball.render();
+  players.forEach((player) => player.update());
+  players.forEach((player) => player.render());
 
   ctx.restore();
 
