@@ -1,3 +1,6 @@
+import { Ball } from "./main";
+import { maps } from "./maps";
+
 export class Point {
   y: number;
   x: number;
@@ -48,4 +51,9 @@ export class Point {
   clone() {
     return new Point(this.x, this.y);
   }
+}
+
+export interface GameState {
+	map: typeof maps[0];
+	balls: Ball[];
 }

@@ -1,6 +1,6 @@
 import { maps } from "./maps";
 import "./style.css";
-import { Point } from "./utils";
+import { GameState, Point } from "./utils";
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d")!;
@@ -23,28 +23,35 @@ interface Touch {
 const friction = 0.03;
 
 let turn: number = 0;
+const tickTurn = () => {
+  if (gameState.balls.every((ball) => ball.state === "hole")) return;
+  turn = (turn + 1) % players.length;
+  if (gameState.balls[turn].state === "hole") tickTurn();
+};
 
 interface BallOptions {
   color?: string;
 }
 
-class Ball extends Point {
+export class Ball extends Point {
   id: number;
   width = 10;
   height = 100;
   pullbackMultiplier = 0.08;
   thickness = 10;
   color = "#" + Math.floor(Math.random() * 16777215).toString(16);
-  state: "pull" | "fly" = "pull";
+  state: "pull" | "fly" | "hole" = "pull";
   radius = 10;
+  falling: {
+    start: Point;
+    target: Point;
+    progress: number;
+    initialRadius: number;
+  } | null = null;
   v: Point = new Point(0, 0);
 
   touch: Touch | null = null;
-  constructor(
-    id: number,
-    { x, y }: { x: number; y: number },
-    options: BallOptions = {}
-  ) {
+  constructor(id: number, { x, y }: { x: number; y: number }, options: BallOptions = {}) {
     super(x, y);
 
     this.id = id;
@@ -64,6 +71,7 @@ class Ball extends Point {
       (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (this.state === "fly") return;
         if (this.touch) return;
         if (turn !== this.id) return;
         if (e.touches.length < 1) return;
@@ -104,13 +112,13 @@ class Ball extends Point {
         const angle = this.pullAngle;
         if (angle === undefined) return;
         this.state = "fly";
+        players[this.id].rounds[players[this.id].rounds.length - 1] += 1;
 
         this.v.set({
           x: -Math.cos(angle) * this.pullback!,
           y: -Math.sin(angle) * this.pullback!,
         });
         this.touch = null;
-        turn = (turn + 1) % players.length;
       }
       if (!touchFound) this.touch = null;
     };
@@ -120,6 +128,7 @@ class Ball extends Point {
 
     // mouse listeners
     document.addEventListener("mousedown", (e) => {
+      if (this.state === "fly") return;
       if (this.touch) return;
       if (turn !== this.id) return;
 
@@ -154,12 +163,13 @@ class Ball extends Point {
         if (angle === undefined) return;
         this.state = "fly";
 
+        players[this.id].rounds[players[this.id].rounds.length - 1] += 1;
+
         this.v.set({
           x: -Math.cos(angle) * this.pullback!,
           y: -Math.sin(angle) * this.pullback!,
         });
         this.touch = null;
-        turn = (turn + 1) % players.length;
 
         this.touch = null;
       }
@@ -180,8 +190,7 @@ class Ball extends Point {
   }
 
   get tension(): number {
-    if (!this.touch || this.touch.current.equals(this.touch.start))
-      return null as any;
+    if (!this.touch || this.touch.current.equals(this.touch.start)) return null as any;
     return Math.sqrt(
       (this.touch.current.x - this.touch.start.x) ** 2 +
         (this.touch.current.y - this.touch.start.y) ** 2
@@ -194,6 +203,24 @@ class Ball extends Point {
       if (this.v.x < 0.01 && this.v.x > -0.01) this.v.x = 0;
       this.v.y *= 1 - friction;
       if (this.v.y < 0.01 && this.v.y > -0.01) this.v.y = 0;
+    } else if (this.state === "hole") {
+      this.v.set({ x: 0, y: 0 });
+      if (this.falling) {
+        this.falling.progress += 0.05;
+        if (this.falling.progress >= 1) {
+          tickTurn();
+        }
+        const multiplier = Math.max(0, 1 - this.falling.progress);
+        this.x =
+          this.falling.start.x * multiplier +
+          this.falling.target.x * this.falling.progress;
+        this.y =
+          this.falling.start.y * multiplier +
+          this.falling.target.y * this.falling.progress;
+        this.radius = this.falling.initialRadius * multiplier;
+      }
+
+      return;
     } else {
       this.state = "pull";
       this.v.set({ x: 0, y: 0 });
@@ -220,6 +247,21 @@ class Ball extends Point {
           }
         })
       );
+    }
+
+    if (this.intersects(gameState.map.hole, holeRadius)) {
+      this.state = "hole";
+      this.falling = {
+        start: this.clone(),
+        target: gameState.map.hole.clone(),
+        progress: 0,
+        initialRadius: this.radius,
+      };
+    }
+    if (this.v.x === 0 && this.v.y === 0 && this.state === "fly") {
+      this.state = "pull";
+      console.log("tickturn");
+      tickTurn();
     }
   }
 
@@ -267,9 +309,7 @@ class Ball extends Point {
 
   render() {
     ctx.beginPath();
-    ctx.fillStyle = this.intersects(map.hole, holeRadius)
-      ? "black"
-      : this.color;
+    ctx.fillStyle = this.color;
 
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
 
@@ -282,9 +322,7 @@ class Ball extends Point {
       ctx.beginPath();
 
       ctx.moveTo(...this.array());
-      ctx.lineTo(
-        ...this.touch.current.subtract(this.touch.start).add(this).array()
-      );
+      ctx.lineTo(...this.touch.current.subtract(this.touch.start).add(this).array());
 
       ctx.stroke();
     }
@@ -295,18 +333,29 @@ class Ball extends Point {
   }
 }
 
-const players = [
-  new Ball(0, { x: 100, y: 100 }),
-  new Ball(1, { x: 200, y: 100 }),
-];
+const createPlayer = () => ({
+  rounds: [] as number[],
+  color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+});
+
+const players = [createPlayer(), createPlayer()];
+
+let gameState: GameState;
+const loadState = (map: (typeof maps)[0]) => {
+  players.forEach((player) => player.rounds.push(0));
+  return {
+    map,
+    balls: players.map((_, i) => new Ball(i, map.start, { color: players[i].color })),
+  };
+};
 
 const camera = new Point(canvas.width / 2, canvas.height / 2);
 
-const map = maps[0];
-
 const holeRadius = 20;
 
-const borders = map.borders.map((border) => {
+gameState = loadState(maps[0]);
+
+const borders = gameState.map.borders.map((border) => {
   const res: [Point, Point][] = [];
 
   for (let i = 0; i < border.length; i++) {
@@ -323,10 +372,7 @@ const render = () => {
   ctx.save();
 
   ctx.scale(1, -1);
-  ctx.translate(
-    camera.x - canvas.width / 2,
-    camera.y - (canvas.height / 2) * 3
-  );
+  ctx.translate(camera.x - canvas.width / 2, camera.y - (canvas.height / 2) * 3);
 
   ctx.lineWidth = 4;
   ctx.strokeStyle = "black";
@@ -341,11 +387,12 @@ const render = () => {
 
   ctx.beginPath();
   ctx.fillStyle = "grey";
-  ctx.arc(...map.hole.array(), holeRadius, 0, Math.PI * 2);
+  ctx.arc(...gameState.map.hole.array(), holeRadius, 0, Math.PI * 2);
   ctx.fill();
 
-  players.forEach((player) => player.update());
-  players.forEach((player) => player.render());
+  gameState.balls.forEach((player) => player.update());
+  gameState.balls.forEach((player) => player.render());
+  gameState.balls[turn].render();
 
   // draw hole
 
